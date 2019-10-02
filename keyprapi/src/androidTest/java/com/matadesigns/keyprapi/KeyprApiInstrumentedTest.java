@@ -21,10 +21,40 @@ import androidx.test.filters.SmallTest;
 import androidx.test.runner.AndroidJUnit4;
 
 import static junit.framework.TestCase.assertTrue;
+import static junit.framework.TestCase.fail;
 
 @RunWith(AndroidJUnit4.class)
 @SmallTest
 public class KeyprApiInstrumentedTest implements JWTGenerator {
+
+    @Override
+    public void jwtTokenNeeded(JWTNeeded handler) {
+        try {
+            JSONObject jsonObject = new JSONObject();
+            JSONObject keyprParams = new JSONObject();
+            try {
+                keyprParams.put("FirstName", "Nicholas");
+                keyprParams.put("LastName", "Mata");
+                keyprParams.put("EmailAddress", "nicholas+test@matadesigns.net");
+                jsonObject.put("KeyPrParams", keyprParams);
+            } catch (JSONException e) {
+                e.printStackTrace();
+            }
+            SycuanJWT res = new Request<SycuanJWT>(Request.Method.Post,
+                    new URL("https://dev.sicdevmobile.com/COGMobilegateway/api/player/keypr_jot_token"),
+                    jsonObject.toString(), SycuanJWT.class, new HashMap<String, String>()
+            {
+                {
+                    put("Client-ID", "ed5134bgf0113456-ios-normal-retina");
+                }
+            }).perform();
+            System.out.println(res);
+            handler.onComplete(res.jwt);
+        } catch(Exception e) {
+            e.printStackTrace();
+            handler.onFailure(e);
+        }
+    }
 
     class SycuanJWT implements Serializable {
         @SerializedName("KEYPR_JOT")
@@ -41,8 +71,17 @@ public class KeyprApiInstrumentedTest implements JWTGenerator {
     @Test
     public void reservations() {
         KeyprApi api = new KeyprApi(BasicApiEnvironment.staging, this);
-        PagedReservations pagedReservations = api.getReservations("/active?include=locations");
-        assertTrue(pagedReservations.data.size() > 0);
+        api.getReservations("/active?include=locations", new Handler<PagedReservations>() {
+            @Override
+            public void onSuccess(PagedReservations pagedReservations) {
+                assertTrue(pagedReservations.data.size() > 0);
+            }
+
+            @Override
+            public void onError(Exception err) {
+                fail();
+            }
+        });
     }
 
     @Test
@@ -85,34 +124,5 @@ public class KeyprApiInstrumentedTest implements JWTGenerator {
             }
         });
         signal.await();
-    }
-
-    @Override
-    public String jwtTokenNeeded() {
-        try {
-            JSONObject jsonObject = new JSONObject();
-            JSONObject keyprParams = new JSONObject();
-            try {
-                keyprParams.put("FirstName", "Nicholas");
-                keyprParams.put("LastName", "Mata");
-                keyprParams.put("EmailAddress", "nicholas+test@matadesigns.net");
-                jsonObject.put("KeyPrParams", keyprParams);
-            } catch (JSONException e) {
-                e.printStackTrace();
-            }
-            SycuanJWT res = new Request<SycuanJWT>(Request.Method.Post,
-                    new URL("https://dev.sicdevmobile.com/COGMobilegateway/api/player/keypr_jot_token"),
-                    jsonObject.toString(), SycuanJWT.class, new HashMap<String, String>()
-            {
-                {
-                    put("Client-ID", "ed5134bgf0113456-ios-normal-retina");
-                }
-            }).perform();
-            System.out.println(res);
-            return res.jwt;
-        } catch(Exception e) {
-            e.printStackTrace();
-            return null;
-        }
     }
 }

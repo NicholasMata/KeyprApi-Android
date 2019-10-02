@@ -64,6 +64,7 @@ public class Reservation implements Serializable {
         public String address;
         public String postalCode;
         public String company;
+        public boolean digitalKeyDisabled;
         public MetaFields metaFields;
         @SerializedName("checkin_date")
         public Date checkInDate;

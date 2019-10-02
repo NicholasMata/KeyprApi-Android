@@ -7,25 +7,26 @@ import com.matadesigns.keyprapi.environments.KeyprApiEnvironment;
 import com.matadesigns.keyprapi.models.OAuthResponse;
 import com.matadesigns.keyprapi.models.PagedReservations;
 import com.matadesigns.keyprapi.models.Reservation;
+import com.matadesigns.keyprapi.models.ReservationFolio;
 import com.matadesigns.keyprapi.models.ReservationTask;
 
 import org.json.JSONException;
 
 import java.io.IOException;
+import java.util.concurrent.Semaphore;
 
-public class KeyprApi {
+public class KeyprApi implements JWTGenerator.JWTNeeded {
     private KeyprApiEnvironment env;
     private JWTGenerator jwtGenerator;
     private WebToken jwt = new WebToken();
     private WebToken accessToken = new WebToken();
     private KeyprRequestBuilder builder;
-    private RequestQueue queue;
+    private Semaphore semaphore = new Semaphore(0);
 
     public KeyprApi(KeyprApiEnvironment env, JWTGenerator jwtGenerator) {
         this.env = env;
         this.jwtGenerator = jwtGenerator;
         this.builder = new KeyprRequestBuilder(env);
-        this.queue = new RequestQueue("com.matadesigns.keyprapi");
     }
 
     public WebToken getAccessToken() {
@@ -50,7 +51,8 @@ public class KeyprApi {
         if (!accessToken.isValid()) {
             if (!jwt.isValid()) {
                 try {
-                    this.jwt.fill(this.jwtGenerator.jwtTokenNeeded());
+                    this.jwtGenerator.jwtTokenNeeded(this);
+                    this.semaphore.acquire();
                 } catch (Exception e) {
                     e.printStackTrace();
                     return false;
@@ -70,19 +72,37 @@ public class KeyprApi {
         return true;
     }
 
-    public PagedReservations getReservations(String query) {
-        if(checkAuthentication()) {
-            try {
-                Gson gson = new GsonBuilder()
-                        .setFieldNamingPolicy(FieldNamingPolicy.LOWER_CASE_WITH_UNDERSCORES)
-                        .setDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'")
-                        .create();
-                return builder.reservations(query).perform(gson);
-            } catch (Exception e) {
-                return null;
+    public void getReservations(String query, Handler<PagedReservations> handler) {
+        new Thread(() -> {
+            if(checkAuthentication()) {
+                try {
+                    Gson gson = new GsonBuilder()
+                            .setFieldNamingPolicy(FieldNamingPolicy.LOWER_CASE_WITH_UNDERSCORES)
+                            .setDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'")
+                            .create();
+                    PagedReservations reservations =  builder.reservations(query).perform(gson);
+                    handler.onSuccess(reservations);
+                } catch (Exception e) {
+                    handler.onError(e);
+                }
             }
-        }
-        return null;
+        }).start();
+    }
+
+    public void getFolio(Reservation reservation, Handler<ReservationFolio> handler) {
+        new Thread(() -> {
+            if(checkAuthentication()) {
+                try {
+                    Gson gson = new GsonBuilder()
+                            .setDateFormat("yyyy-MM-dd")
+                            .create();
+                    ReservationFolio folio = builder.folio(reservation.meta.folioDetailsUrl).perform(gson);
+                    handler.onSuccess(folio);
+                } catch (Exception e) {
+                    handler.onError(e);
+                }
+            }
+        }).start();
     }
 
     public void perform(KeyprAsyncTask task, String reservationId, int timeout, int interval, Handler<ReservationTask> handler) {
@@ -125,8 +145,20 @@ public class KeyprApi {
                     }
                 }
             };
+
             new Thread(runnable).start();
         }
     }
 
+    @Override
+    public void onComplete(String jwtValue) throws JWTExceptions.JWTInvalidPayloadException, JSONException, JWTExceptions.JWTInvalidStructureException {
+        this.jwt.fill(jwtValue);
+        this.semaphore.release();
+    }
+
+    @Override
+    public void onFailure(Exception err) {
+        this.semaphore.release();
+        err.printStackTrace();
+    }
 }
